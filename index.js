@@ -13,17 +13,17 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3001;
 const jwt = require("jsonwebtoken");
-// TODO: Deploy website to Azure
+
 mongoose.connect(MONGO_URI);
 
 const db = mongoose.connection;
-
+//RsAU85QiqKNZ9A6V
 // app stuff
 app.use(express.json({ limit: "50mb" }));
 app.use(helmet());
 
-//const cors = require("cors");
-//app.use(cors());
+const cors = require("cors");
+app.use(cors());
 
 // CHECK IF USING API_KEY
 const authAPI = (API_KEY) => {
