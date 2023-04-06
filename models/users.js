@@ -12,6 +12,17 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    admin: {
+      type: Boolean,
+    },
+    privateKey: {
+      type: String,
+      require: true,
+    },
+    aesKeys: {
+      type: Array,
+      require: false,
+    },
   },
   { collection: "users" }
 );

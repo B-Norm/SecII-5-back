@@ -13,11 +13,13 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3001;
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 mongoose.connect(MONGO_URI);
 
 const db = mongoose.connection;
-//RsAU85QiqKNZ9A6V
+// TODO: Create new Mongo Models and figure out key mgmt
+
 // app stuff
 app.use(express.json({ limit: "50mb" }));
 app.use(helmet());
@@ -88,7 +90,7 @@ app.post("/api/login", authAPI(API_KEY), async (req, res) => {
     return res.status(400);
   }
 
-  db.on("error", (err) => {
+  /* db.on("error", (err) => {
     res
       .status(469)
       .res.json({ message: `Failed to connect to MongoDB Atlas: ${err}` });
@@ -96,7 +98,7 @@ app.post("/api/login", authAPI(API_KEY), async (req, res) => {
 
   db.once("open", () => {
     console.log("Connected to MongoDB Atlas");
-  });
+  }); */
 
   UserModel.findOne({ username: req.body.username }).then((user) => {
     if (user == null) {
@@ -124,16 +126,7 @@ app.post("/api/login", authAPI(API_KEY), async (req, res) => {
 
 // add steg image to db
 app.post("/api/upload", authToken, async (req, res) => {
-  if (
-    !validateParams(req.body, [
-      "stegName",
-      "file",
-      "mSkip",
-      "mPeriod",
-      "mName",
-      "mSize",
-    ])
-  ) {
+  if (!validateParams(req.body, ["filename", "file"])) {
     console.log("/api/upload: wrong input");
     return res.status(400);
   }
