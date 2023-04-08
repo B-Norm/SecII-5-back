@@ -21,7 +21,9 @@ const userSchema = new mongoose.Schema(
     },
     aesKeys: {
       type: Array,
-      require: false,
+    },
+    desKeys: {
+      type: Array,
     },
   },
   { collection: "users" }
