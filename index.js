@@ -11,10 +11,12 @@ const UserModel = require("./models/users.js");
 const FileModel = require("./models/files.js");
 const API_KEY = process.env.API_KEY;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const SERVER_PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3001;
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const forge = require("node-forge");
 
 mongoose.connect(MONGO_URI);
 
@@ -29,6 +31,7 @@ app.use(helmet());
 const cors = require("cors");
 const KeyModel = require("./models/keys.js");
 const { isNull } = require("util");
+const SymKeyModel = require("./models/symKeys.js");
 app.use(cors());
 
 // CHECK IF USING API_KEY
@@ -55,6 +58,7 @@ const authAPI = (API_KEY) => {
     }
   };
 };
+
 function authToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -84,6 +88,8 @@ function removeFileFromMulterFolder(filename) {
 }
 
 // REGISTER USERS
+//
+//
 app.post("/api/register", authAPI(API_KEY), async (req, res) => {
   if (!validateParams(req.body, ["username", "password"])) {
     console.log("/api/register: wrong input");
@@ -96,27 +102,6 @@ app.post("/api/register", authAPI(API_KEY), async (req, res) => {
   });
   new_user.password = new_user.generateHash(req.body.password);
 
-  /*  // Get RSA keys and add to DB
-  const keyPair = generateRSAKeys();
-  new_user.privateKey = keyPair.privateKey;
-  var keyRing = new KeyModel({
-    username: req.body.username,
-    publicKey: keyPair.publicKey,
-  });
-  await keyRing
-    .save()
-    .then(() => {
-      console.log(keyRing.username + "'s key has been added");
-    })
-    .catch((err) => {
-      console.log(err);
-      return res.status(500).json({
-        msg: "error adding keys",
-        status: 401,
-      });
-    }); */
-  // if username is unique create new
-  // user, else send 401 error
   await new_user
     .save()
     .then(() => {
@@ -180,7 +165,6 @@ app.post("/api/login", authAPI(API_KEY), async (req, res) => {
 app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
   //console.log(req.file);
   //console.log(req.body);
-  console.log(req.body.filename);
   if (typeof req.body.filename === "undefined") {
     return res.status(500).json({
       msg: "No file Submited",
@@ -195,9 +179,11 @@ app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
       contentType: req.file.mimetype,
     },
   });
-
+  /* console.log("\\" + new_file.file.data.toJSON().data.toString() + "/");
+  console.log(
+    new_file.hashWithSHA3(new_file.file.data.toJSON().data.toString())
+  );  */
   new_file.hash = new_file.hashWithSHA3(new_file.file.data);
-  //console.log(new_file.file.data);
 
   await new_file
     .save()
@@ -206,7 +192,6 @@ app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
       return res.status(200).json({
         msg: "file added",
         status: 200,
-        //data: req.body.file,
       });
     })
     .catch((err) => {
@@ -220,9 +205,11 @@ app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
 });
 
 // get all files from DB
+//
+//
 app.get("/api/getFiles", authToken, async (req, res) => {
   try {
-    console.log("Loading Files to Client");
+    // console.log("Loading Files to Client");
     const files = await FileModel.find();
     res.status(200).json(files);
   } catch (err) {
@@ -245,7 +232,63 @@ app.get("/api/deleteAllFiles", authToken, async (req, res) => {
   }
 });
 
-// Store pub keys in DB
+// AES Stuff
+//
+//
+app.post("/api/keys/storeSym", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["encryptKey", "style", "username"])) {
+    console.log("/api/keys/storeSym: wrong input");
+    return res.status(400);
+  }
+  // first decrypt encrypt key
+  let decryptedBuffer;
+  try {
+    console.log("Starting");
+    const encryptedBuffer = forge.util.decode64(req.body.encryptKey);
+    console.log("Encrypted buffer:");
+    console.log(encryptedBuffer);
+
+    const privateKeyObject = forge.pki.privateKeyFromPem(SERVER_PRIVATE_KEY);
+    decryptedBuffer = privateKeyObject.decrypt(encryptedBuffer);
+    console.log("Decrypted buffer:");
+    console.log(decryptedBuffer);
+
+    symKeyBase64 = forge.util.decode64(decryptedBuffer);
+    console.log("encodedEnc:");
+    console.log(symKeyBase64);
+  } catch (err) {
+    console.log(
+      "Failed to decrypt key from " + req.body.username + ": " + err.message
+    );
+  }
+
+  const prefix = ["AES-", "3DES-"];
+  let username = req.body.username;
+  let symKey = decryptedBuffer;
+  let name = prefix[req.body.style - 1] + username;
+  var new_sym = SymKeyModel({ keyName: name, username, symKey });
+
+  await new_sym
+    .save()
+    .then(() => {
+      return res.status(200).json({
+        msg: "Key added",
+        status: 200,
+      });
+    })
+    .catch((err) => {
+      console.log(err);
+      return res.status(500).json({
+        msg: "Key Save Error",
+        status: 500,
+        error: err,
+      });
+    });
+});
+
+// RSA Stuff
+//
+//
 app.post("/api/keys/storePub", authAPI(API_KEY), async (req, res) => {
   if (!validateParams(req.body, ["username", "publicKey"])) {
     console.log("/api/keys/storePub: wrong input");
@@ -274,7 +317,7 @@ app.post("/api/keys/storePub", authAPI(API_KEY), async (req, res) => {
 
 app.get("/api/keys/getAllPublic", authToken, async (req, res) => {
   try {
-    console.log("Loading Public Keys to Client");
+    //console.log("Loading Public Keys to Client");
     const pubKeys = await KeyModel.find();
     res.status(200).json(pubKeys);
   } catch (err) {
@@ -318,7 +361,7 @@ app.get("/api/keys/getUsersSymmKeys", authToken, async (req, res) => {
 
 app.post("/api/RSA/encrypt", authToken, async (req, res) => {
   if (!validateParams(req.body, ["file", "fileID"])) {
-    console.log("/api/encrypt: wrong input");
+    console.log("/api/RSA/encrypt: wrong input");
     return res.status(400);
   }
   FileModel.findOne({ _id: req.body.fileID }).then((file) => {
@@ -338,7 +381,7 @@ app.post("/api/RSA/encrypt", authToken, async (req, res) => {
 
 app.post("/api/RSA/decrypt", authToken, async (req, res) => {
   if (!validateParams(req.body, ["file", "fileID"])) {
-    console.log("/api/encrypt: wrong input");
+    console.log("/api/RSA/decrypt: wrong input");
     return res.status(400);
   }
   FileModel.findOne({ _id: req.body.fileID }).then((file) => {
@@ -350,8 +393,34 @@ app.post("/api/RSA/decrypt", authToken, async (req, res) => {
     } else {
       file.file.data = Buffer.from(req.body.file, "base64");
       file.encrypted = false;
-      file.save();
-      return res.status(200).send();
+      if (file.hashWithSHA3(file.file.data) === file.hash) {
+        file.save();
+        return res.status(200).send();
+      } else {
+        return res.status(500).json({
+          msg: "File has been tampered",
+          status: 500,
+        });
+      }
+    }
+  });
+});
+
+// test for file integrity
+app.post("/api/hash", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["fileID"])) {
+    console.log("/api/hash: wrong input");
+    return res.status(400);
+  }
+  FileModel.findOne({ _id: req.body.fileID }).then((file) => {
+    //console.log(file.file.data.toJSON().data);
+    if (file == null) {
+      return res.status(404).json({
+        msg: "File not Found",
+        status: 404,
+      });
+    } else {
+      return res.status(200).json({ hash: file.hash });
     }
   });
 });

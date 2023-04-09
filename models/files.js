@@ -92,21 +92,6 @@ fileSchema.methods.decryptWith3DES = function (key) {
   return false;
 };
 
-// RSA Encryption and Decryption
-/* fileSchema.methods.encryptWithRSA = function (publicKey) {
-  this.file.data = crypto.publicEncrypt(publicKey, this.file.data);
-  this.encrypted = true;
-  this.save();
-  return;
-};
-
-fileSchema.methods.decryptWithRSA = function (privateKey) {
-  this.file.data = crypto.privateDecrypt(privateKey, this.file.data);
-  this.encrypted = false;
-  this.save();
-  return;
-}; */
-
 // SHA-3 Hashing
 fileSchema.methods.hashWithSHA3 = (file) => {
   const hash = crypto.createHash("sha3-256");
