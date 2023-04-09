@@ -37,28 +37,34 @@ fileSchema.methods.createIV = function (style, str) {
     console.log(this.IV);
   } else if (style === "AES" && !str) {
     this.iv = crypto.randomBytes(16);
+    console.log(this.IV);
   } else {
     this.iv = crypto.createHash("md5").update(str).digest("hex");
     console.log(this.IV);
   }
+  this.save();
 };
 
 // AES Encryption and Decryption
 fileSchema.methods.encryptWithAES = function (key) {
   const cipher = crypto.createCipheriv("aes-256-cbc", key, this.iv);
-  this.file.data.data = Buffer.concat([
-    cipher.update(this.file.data.data),
+  this.file.data = Buffer.concat([
+    cipher.update(this.file.data),
     cipher.final(),
   ]);
+  this.save();
+  return;
 };
 
 fileSchema.methods.decryptWithAES = function (key) {
   const decipher = crypto.createDecipheriv("aes-256-cbc", key, this.iv);
-  let decrypted = decipher.update(this.file.data.data);
+  let decrypted = decipher.update(this.file.data);
   decrypted = Buffer.concat([decrypted, decipher.final()]);
 
   if (this.hash === this.hashWithSHA3(decrypted)) {
-    this.file.data.data = decrypted;
+    this.file.data = decrypted;
+    this.save();
+    return true;
   }
   return false;
 };
@@ -66,25 +72,28 @@ fileSchema.methods.decryptWithAES = function (key) {
 // 3-DES Encryption and Decryption
 fileSchema.methods.encryptWith3DES = function (key) {
   const cipher = crypto.createCipheriv("des-ede3-cbc", key, this.iv);
-  this.file.data.data = Buffer.concat([
-    cipher.update(this.file.data.data),
+  this.file.data = Buffer.concat([
+    cipher.update(this.file.data),
     cipher.final(),
   ]);
+  this.save();
+  return;
 };
 
 fileSchema.methods.decryptWith3DES = function (key) {
   const decipher = crypto.createDecipheriv("des-ede3-cbc", key, this.iv);
-  let decrypted = decipher.update(this.file.data.data);
+  let decrypted = decipher.update(this.file.data);
   decrypted = Buffer.concat([decrypted, decipher.final()]);
-
   if (this.hash === this.hashWithSHA3(decrypted)) {
-    this.file.data.data = decrypted;
+    this.file.data = decrypted;
+    this.save();
+    return true;
   }
   return false;
 };
 
 // RSA Encryption and Decryption
-fileSchema.methods.encryptWithRSA = function (publicKey) {
+/* fileSchema.methods.encryptWithRSA = function (publicKey) {
   this.file.data = crypto.publicEncrypt(publicKey, this.file.data);
   this.encrypted = true;
   this.save();
@@ -92,9 +101,11 @@ fileSchema.methods.encryptWithRSA = function (publicKey) {
 };
 
 fileSchema.methods.decryptWithRSA = function (privateKey) {
-  this.file.data.data = crypto.privateDecrypt(privateKey, this.file.data.data);
+  this.file.data = crypto.privateDecrypt(privateKey, this.file.data);
   this.encrypted = false;
-};
+  this.save();
+  return;
+}; */
 
 // SHA-3 Hashing
 fileSchema.methods.hashWithSHA3 = (file) => {

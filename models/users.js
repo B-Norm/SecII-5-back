@@ -15,16 +15,6 @@ const userSchema = new mongoose.Schema(
     admin: {
       type: Boolean,
     },
-    privateKey: {
-      type: String,
-      require: true,
-    },
-    aesKeys: {
-      type: Array,
-    },
-    desKeys: {
-      type: Array,
-    },
   },
   { collection: "users" }
 );
