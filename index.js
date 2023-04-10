@@ -243,6 +243,7 @@ app.post("/api/keys/storeSym", authToken, async (req, res) => {
     return res.status(400);
   }
   // first decrypt encrypt key
+  // TODO: Store in the DB encrypted and decrypt before sending back to client
   let decryptedBuffer;
   try {
     console.log("Starting");
@@ -323,7 +324,7 @@ app.post("/api/keys/getSym", authToken, async (req, res) => {
 
 app.post("/api/AES/encrypt", authToken, async (req, res) => {
   if (!validateParams(req.body, ["iv", "file", "fileID"])) {
-    console.log("/api/keys/getSym: wrong input");
+    console.log("/api/AES/encrypt: wrong input");
     return res.status(400);
   }
   FileModel.findOne({ _id: req.body.fileID }).then((file) => {
@@ -344,7 +345,59 @@ app.post("/api/AES/encrypt", authToken, async (req, res) => {
 
 app.post("/api/AES/decrypt", authToken, async (req, res) => {
   if (!validateParams(req.body, ["file", "fileID"])) {
-    console.log("/api/RSA/decrypt: wrong input");
+    console.log("/api/AES/decrypt: wrong input");
+    return res.status(400);
+  }
+  FileModel.findOne({ _id: req.body.fileID }).then((file) => {
+    if (file == null) {
+      return res.status(404).json({
+        msg: "File not Found",
+        status: 404,
+      });
+    } else {
+      file.file.data = Buffer.from(req.body.file, "base64");
+      file.encrypted = false;
+      file.iv = undefined;
+      if (file.hashWithSHA3(file.file.data) === file.hash) {
+        file.save();
+        return res.status(200).send();
+      } else {
+        return res.status(500).json({
+          msg: "File has been tampered",
+          status: 500,
+        });
+      }
+    }
+  });
+});
+
+// 3DES Stuff
+//
+//
+app.post("/api/3DES/encrypt", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["iv", "file", "fileID"])) {
+    console.log("/api/3DES/encrypt: wrong input");
+    return res.status(400);
+  }
+  FileModel.findOne({ _id: req.body.fileID }).then((file) => {
+    if (file == null) {
+      return res.status(404).json({
+        msg: "File not Found",
+        status: 404,
+      });
+    } else {
+      file.file.data = Buffer.from(req.body.file, "base64");
+      file.iv = req.body.iv;
+      file.encrypted = true;
+      file.save();
+      return res.status(200).send();
+    }
+  });
+});
+
+app.post("/api/3DES/decrypt", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["file", "fileID"])) {
+    console.log("/api/3DES/decrypt: wrong input");
     return res.status(400);
   }
   FileModel.findOne({ _id: req.body.fileID }).then((file) => {
