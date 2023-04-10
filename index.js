@@ -244,30 +244,11 @@ app.post("/api/keys/storeSym", authToken, async (req, res) => {
   }
   // first decrypt encrypt key
   // TODO: Store in the DB encrypted and decrypt before sending back to client
-  let decryptedBuffer;
-  try {
-    console.log("Starting");
-    const encryptedBuffer = forge.util.decode64(req.body.encryptKey);
-    console.log("Encrypted buffer:");
-    console.log(encryptedBuffer);
 
-    const privateKeyObject = forge.pki.privateKeyFromPem(SERVER_PRIVATE_KEY);
-    decryptedBuffer = privateKeyObject.decrypt(encryptedBuffer);
-    console.log("Decrypted buffer:");
-    console.log(decryptedBuffer);
-
-    symKeyBase64 = forge.util.decode64(decryptedBuffer);
-    console.log("encodedEnc:");
-    console.log(symKeyBase64);
-  } catch (err) {
-    console.log(
-      "Failed to decrypt key from " + req.body.username + ": " + err.message
-    );
-  }
+  let symKey = asymDecrypt(req.body.encryptKey, SERVER_PRIVATE_KEY, "buffer");
 
   const prefix = ["AES-", "3DES-"];
   let username = req.body.username;
-  let symKey = decryptedBuffer;
   let name = prefix[req.body.style - 1] + username;
   var new_sym = SymKeyModel({
     keyName: name,
@@ -305,21 +286,20 @@ app.post("/api/keys/getSym", authToken, async (req, res) => {
     username,
     style: encryptStyle[style - 1],
   }).then((keys) => {
-    // Encrypt data with AES and send it with the IV at the front
-    const iv = forge.random.getBytesSync(16);
-    const aesKeyBytes = forge.util.decode64(SERVER_AES_KEY);
+    KeyModel.findOne({ username: req.body.username }).then((pubKey) => {
+      const publicKey = pubKey.publicKey;
+      // Encrypt data with AES and send it with the IV at the front
+      const keysString = JSON.stringify(keys);
+      const aesEncryptedData = symEncrpytWithRand(keysString);
 
-    const cipher = forge.cipher.createCipher("AES-CBC", aesKeyBytes);
-    cipher.start({ iv: iv });
-    cipher.update(forge.util.createBuffer(JSON.stringify(keys)));
-    cipher.finish();
-
-    const encryptedKeys =
-      forge.util.encode64(iv) + forge.util.encode64(cipher.output.getBytes());
-    return res.status(200).json({ encryptedData: encryptedKeys });
+      // encrypt AES key with User's pubKey
+      const keyEncrpyt = asymEncrypt(aesEncryptedData.key, publicKey);
+      return res.status(200).json({
+        encryptedData: aesEncryptedData.encryptedBase64,
+        encryptedKey: keyEncrpyt,
+      });
+    });
   });
-  // get user's keys and encrypt with server
-  // key then encrypt with user's private
 });
 
 app.post("/api/AES/encrypt", authToken, async (req, res) => {
@@ -355,6 +335,7 @@ app.post("/api/AES/decrypt", authToken, async (req, res) => {
         status: 404,
       });
     } else {
+      console.log(req.body);
       file.file.data = Buffer.from(req.body.file, "base64");
       file.encrypted = false;
       file.iv = undefined;
@@ -598,6 +579,50 @@ const generateRSAKeys = () => {
   };
 };
 
+const asymEncrypt = (data, pubKey, returnType) => {
+  const publicKeyObject = forge.pki.publicKeyFromPem(pubKey);
+
+  const encryptedBuffer = publicKeyObject.encrypt(data);
+
+  const encodedEncrypt = forge.util.encode64(encryptedBuffer);
+  if (returnType === "buffer") {
+    return encryptedBuffer;
+  } else {
+    return encodedEncrypt;
+  }
+};
+
+const asymDecrypt = (encrypt64, privKey, returnType) => {
+  let decryptedBuffer;
+  try {
+    const encryptedBuffer = forge.util.decode64(encrypt64);
+    const privateKeyObject = forge.pki.privateKeyFromPem(privKey);
+    decryptedBuffer = privateKeyObject.decrypt(encryptedBuffer);
+    if (returnType === "buffer") {
+      return decryptedBuffer;
+    } else {
+      symKeyBase64 = forge.util.decode64(decryptedBuffer);
+      return symKeyBase64;
+    }
+  } catch (err) {
+    console.log(
+      "Failed to decrypt key from " + req.body.username + ": " + err.message
+    );
+  }
+};
+
+const symEncrpytWithRand = (data) => {
+  const iv = forge.random.getBytesSync(16);
+  const key = forge.random.getBytesSync(32);
+  const cipher = forge.cipher.createCipher("AES-CBC", key);
+  cipher.start({ iv: iv });
+  cipher.update(forge.util.createBuffer(data));
+  cipher.finish();
+  const encryptedBase64 =
+    forge.util.encode64(iv) + forge.util.encode64(cipher.output.getBytes());
+
+  return { encryptedBase64, key };
+};
 app.listen(PORT, () => {
   console.log("Server Running at: " + PORT);
 });
