@@ -12,6 +12,7 @@ const FileModel = require("./models/files.js");
 const API_KEY = process.env.API_KEY;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const SERVER_PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY;
+const SERVER_AES_KEY = process.env.SERVER_AES_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3001;
 const jwt = require("jsonwebtoken");
@@ -32,6 +33,7 @@ const cors = require("cors");
 const KeyModel = require("./models/keys.js");
 const { isNull } = require("util");
 const SymKeyModel = require("./models/symKeys.js");
+const { log } = require("console");
 app.use(cors());
 
 // CHECK IF USING API_KEY
@@ -266,7 +268,12 @@ app.post("/api/keys/storeSym", authToken, async (req, res) => {
   let username = req.body.username;
   let symKey = decryptedBuffer;
   let name = prefix[req.body.style - 1] + username;
-  var new_sym = SymKeyModel({ keyName: name, username, symKey });
+  var new_sym = SymKeyModel({
+    keyName: name,
+    username,
+    symKey,
+    style: prefix[req.body.style - 1].slice(0, -1),
+  });
 
   await new_sym
     .save()
@@ -284,6 +291,83 @@ app.post("/api/keys/storeSym", authToken, async (req, res) => {
         error: err,
       });
     });
+});
+
+app.post("/api/keys/getSym", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["style", "username"])) {
+    console.log("/api/keys/getSym: wrong input");
+    return res.status(400);
+  }
+  const { style, username } = req.body;
+  const encryptStyle = ["AES", "3DES"];
+  SymKeyModel.find({
+    username,
+    style: encryptStyle[style - 1],
+  }).then((keys) => {
+    // Encrypt data with AES and send it with the IV at the front
+    const iv = forge.random.getBytesSync(16);
+    const aesKeyBytes = forge.util.decode64(SERVER_AES_KEY);
+
+    const cipher = forge.cipher.createCipher("AES-CBC", aesKeyBytes);
+    cipher.start({ iv: iv });
+    cipher.update(forge.util.createBuffer(JSON.stringify(keys)));
+    cipher.finish();
+
+    const encryptedKeys =
+      forge.util.encode64(iv) + forge.util.encode64(cipher.output.getBytes());
+    return res.status(200).json({ encryptedData: encryptedKeys });
+  });
+  // get user's keys and encrypt with server
+  // key then encrypt with user's private
+});
+
+app.post("/api/AES/encrypt", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["iv", "file", "fileID"])) {
+    console.log("/api/keys/getSym: wrong input");
+    return res.status(400);
+  }
+  FileModel.findOne({ _id: req.body.fileID }).then((file) => {
+    if (file == null) {
+      return res.status(404).json({
+        msg: "File not Found",
+        status: 404,
+      });
+    } else {
+      file.file.data = Buffer.from(req.body.file, "base64");
+      file.iv = req.body.iv;
+      file.encrypted = true;
+      file.save();
+      return res.status(200).send();
+    }
+  });
+});
+
+app.post("/api/AES/decrypt", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["file", "fileID"])) {
+    console.log("/api/RSA/decrypt: wrong input");
+    return res.status(400);
+  }
+  FileModel.findOne({ _id: req.body.fileID }).then((file) => {
+    if (file == null) {
+      return res.status(404).json({
+        msg: "File not Found",
+        status: 404,
+      });
+    } else {
+      file.file.data = Buffer.from(req.body.file, "base64");
+      file.encrypted = false;
+      file.iv = undefined;
+      if (file.hashWithSHA3(file.file.data) === file.hash) {
+        file.save();
+        return res.status(200).send();
+      } else {
+        return res.status(500).json({
+          msg: "File has been tampered",
+          status: 500,
+        });
+      }
+    }
+  });
 });
 
 // RSA Stuff
