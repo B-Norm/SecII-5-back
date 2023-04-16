@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 const crypto = require("crypto");
 
-// TODO: Use the encrypted status to change URL/ Change server reaction
 const fileSchema = new mongoose.Schema(
   {
     filename: {

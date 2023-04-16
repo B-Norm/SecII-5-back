@@ -12,6 +12,7 @@ const FileModel = require("./models/files.js");
 const API_KEY = process.env.API_KEY;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const SERVER_PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY;
+const SERVER_PUBLIC_KEY = process.env.SERVER_PUBLIC_KEY;
 const SERVER_AES_KEY = process.env.SERVER_AES_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3001;
@@ -23,17 +24,13 @@ mongoose.connect(MONGO_URI);
 
 const db = mongoose.connection;
 
-// TODO: Create new Mongo Models and figure out key mgmt
-
 // app stuff
 app.use(express.json({ limit: "50mb" }));
 app.use(helmet());
 
 const cors = require("cors");
 const KeyModel = require("./models/keys.js");
-const { isNull } = require("util");
 const SymKeyModel = require("./models/symKeys.js");
-const { log } = require("console");
 app.use(cors());
 
 // CHECK IF USING API_KEY
@@ -150,23 +147,34 @@ app.post("/api/login", authAPI(API_KEY), async (req, res) => {
         status: 401,
       });
     } else {
-      // password is correct TODO: Added privateKey to return
       const token = jwt.sign({ username: req.body.username }, PRIVATE_KEY, {
         expiresIn: "1hr",
       });
       return res.json({
         status: 200,
         token: token,
-        key: user.privateKey,
+        SERVER_PUBLIC_KEY: SERVER_PUBLIC_KEY,
       });
     }
   });
 });
 
+app.get("/api/getUsers", authToken, async (req, res) => {
+  try {
+    const users = await UserModel.find();
+    const usernames = users.map((user) => ({
+      title: "username",
+      username: user.username,
+    }));
+    res.status(200).json(usernames);
+  } catch (err) {
+    console.log("Error loading usernames");
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // add steg image to db
 app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
-  //console.log(req.file);
-  //console.log(req.body);
   if (typeof req.body.filename === "undefined") {
     return res.status(500).json({
       msg: "No file Submited",
@@ -237,6 +245,32 @@ app.get("/api/deleteAllFiles", authToken, async (req, res) => {
 // AES Stuff
 //
 //
+app.post("/api/keys/shareSymKey", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["encryptKey", "keyName", "username"])) {
+    console.log("/api/keys/storeSym: wrong input");
+    return res.status(400);
+  }
+  const { encryptKey, keyName, username } = req.body;
+
+  // decrypt key using server private and store in
+  const sharedKey64 = asymDecrypt(encryptKey, SERVER_PRIVATE_KEY);
+
+  // Store Sym key in DB
+  var new_sym = new SymKeyModel({
+    keyName,
+    username,
+    symKey: sharedKey64,
+    style: keyName.split("-")[0],
+  });
+  new_sym.ignoreMiddleware = true;
+  new_sym.save().then(() => {
+    return res.status(200).json({
+      msg: "Key added",
+      status: 200,
+    });
+  });
+});
+
 app.post("/api/keys/storeSym", authToken, async (req, res) => {
   if (!validateParams(req.body, ["encryptKey", "style", "username"])) {
     console.log("/api/keys/storeSym: wrong input");
@@ -245,18 +279,20 @@ app.post("/api/keys/storeSym", authToken, async (req, res) => {
   // first decrypt encrypt key
   // TODO: Store in the DB encrypted and decrypt before sending back to client
 
-  let symKey = asymDecrypt(req.body.encryptKey, SERVER_PRIVATE_KEY, "buffer");
-
-  const prefix = ["AES-", "3DES-"];
-  let username = req.body.username;
-  let name = prefix[req.body.style - 1] + username;
-  var new_sym = SymKeyModel({
-    keyName: name,
-    username,
-    symKey,
-    style: prefix[req.body.style - 1].slice(0, -1),
-  });
-
+  try {
+    let symKey = asymDecrypt(req.body.encryptKey, SERVER_PRIVATE_KEY);
+    const prefix = ["AES-", "3DES-"];
+    let username = req.body.username;
+    let name = prefix[req.body.style - 1] + username;
+    var new_sym = SymKeyModel({
+      keyName: name,
+      username,
+      symKey,
+      style: prefix[req.body.style - 1].slice(0, -1),
+    });
+  } catch (err) {
+    console.error(err);
+  }
   await new_sym
     .save()
     .then(() => {
@@ -276,30 +312,51 @@ app.post("/api/keys/storeSym", authToken, async (req, res) => {
 });
 
 app.post("/api/keys/getSym", authToken, async (req, res) => {
+  // style: 1 = AES, 2 = 3DES, 3 = ALL
   if (!validateParams(req.body, ["style", "username"])) {
     console.log("/api/keys/getSym: wrong input");
     return res.status(400);
   }
   const { style, username } = req.body;
-  const encryptStyle = ["AES", "3DES"];
-  SymKeyModel.find({
-    username,
-    style: encryptStyle[style - 1],
-  }).then((keys) => {
-    KeyModel.findOne({ username: req.body.username }).then((pubKey) => {
-      const publicKey = pubKey.publicKey;
-      // Encrypt data with AES and send it with the IV at the front
-      const keysString = JSON.stringify(keys);
-      const aesEncryptedData = symEncrpytWithRand(keysString);
+  if (style != 3) {
+    const encryptStyle = ["AES", "3DES"];
+    SymKeyModel.find({
+      username,
+      style: encryptStyle[style - 1],
+    }).then((keys) => {
+      KeyModel.findOne({ username: req.body.username }).then((pubKeys) => {
+        const publicKey = pubKeys.publicKey;
+        // Encrypt data with AES and send it with the IV at the front
+        const keysString = JSON.stringify(keys);
+        const aesEncryptedData = symEncrpytWithRand(keysString);
 
-      // encrypt AES key with User's pubKey
-      const keyEncrpyt = asymEncrypt(aesEncryptedData.key, publicKey);
-      return res.status(200).json({
-        encryptedData: aesEncryptedData.encryptedBase64,
-        encryptedKey: keyEncrpyt,
+        // encrypt AES key with User's pubKey
+        const keyEncrpyt = asymEncrypt(aesEncryptedData.key, publicKey);
+        return res.status(200).json({
+          encryptedData: aesEncryptedData.encryptedBase64,
+          encryptedKey: keyEncrpyt,
+        });
       });
     });
-  });
+  } else {
+    SymKeyModel.find({
+      username,
+    }).then((keys) => {
+      KeyModel.findOne({ username: req.body.username }).then((pubKeys) => {
+        const publicKey = pubKeys.publicKey;
+        // Encrypt data with AES and send it with the IV at the front
+        const keysString = JSON.stringify(keys);
+        const aesEncryptedData = symEncrpytWithRand(keysString);
+
+        // encrypt AES key with User's pubKey
+        const keyEncrpyt = asymEncrypt(aesEncryptedData.key, publicKey);
+        return res.status(200).json({
+          encryptedData: aesEncryptedData.encryptedBase64,
+          encryptedKey: keyEncrpyt,
+        });
+      });
+    });
+  }
 });
 
 app.post("/api/AES/encrypt", authToken, async (req, res) => {
@@ -335,7 +392,6 @@ app.post("/api/AES/decrypt", authToken, async (req, res) => {
         status: 404,
       });
     } else {
-      console.log(req.body);
       file.file.data = Buffer.from(req.body.file, "base64");
       file.encrypted = false;
       file.iv = undefined;
@@ -437,39 +493,6 @@ app.get("/api/keys/getAllPublic", authToken, async (req, res) => {
   try {
     //console.log("Loading Public Keys to Client");
     const pubKeys = await KeyModel.find();
-    res.status(200).json(pubKeys);
-  } catch (err) {
-    console.log("Error Public Keys to Client");
-    res.status(500).json({ message: err.message });
-  }
-});
-
-app.get("/api/keys/getUsersSymmKeys", authToken, async (req, res) => {
-  const { username, style } = req.body;
-  const encryptStyles = ["AES", "3DES"];
-  try {
-    console.log(
-      "Loading " + username + "'s " + encryptStyles[style] + " Keys to Client"
-    );
-    const symmKeys = await UserModel.findOne({ username }).then((user) => {
-      if (user == null) {
-        return res.status(404).json({
-          msg: "user not found",
-          status: 404,
-        });
-      } else if (style === 1) {
-        return res.status(200).json({
-          status: 200,
-          keyRing: user.aesKeys,
-        });
-      } else if (style === 2) {
-        return res.status(200).json({
-          status: 200,
-          keyRing: user.desKeys,
-        });
-      }
-    });
-
     res.status(200).json(pubKeys);
   } catch (err) {
     console.log("Error Public Keys to Client");
@@ -584,12 +607,7 @@ const asymEncrypt = (data, pubKey, returnType) => {
 
   const encryptedBuffer = publicKeyObject.encrypt(data);
 
-  const encodedEncrypt = forge.util.encode64(encryptedBuffer);
-  if (returnType === "buffer") {
-    return encryptedBuffer;
-  } else {
-    return encodedEncrypt;
-  }
+  return encryptedBuffer;
 };
 
 const asymDecrypt = (encrypt64, privKey, returnType) => {
@@ -598,16 +616,10 @@ const asymDecrypt = (encrypt64, privKey, returnType) => {
     const encryptedBuffer = forge.util.decode64(encrypt64);
     const privateKeyObject = forge.pki.privateKeyFromPem(privKey);
     decryptedBuffer = privateKeyObject.decrypt(encryptedBuffer);
-    if (returnType === "buffer") {
-      return decryptedBuffer;
-    } else {
-      symKeyBase64 = forge.util.decode64(decryptedBuffer);
-      return symKeyBase64;
-    }
+
+    return decryptedBuffer;
   } catch (err) {
-    console.log(
-      "Failed to decrypt key from " + req.body.username + ": " + err.message
-    );
+    console.log("Failed to decrypt key " + err.message);
   }
 };
 

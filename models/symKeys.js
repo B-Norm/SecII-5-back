@@ -19,11 +19,18 @@ const symKeySchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    ignoreMiddleware: {
+      type: Boolean,
+      default: false,
+    },
   },
   { collection: "symKeys" }
 );
 
 symKeySchema.pre("save", async function (next) {
+  if (this.ignoreMiddleware) {
+    return next();
+  }
   const name = this.keyName;
   const regex = new RegExp(`^${name}-(\\d+)$`, "i");
   const model = mongoose.model("symKeys");
