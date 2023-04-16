@@ -13,7 +13,6 @@ const API_KEY = process.env.API_KEY;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const SERVER_PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY;
 const SERVER_PUBLIC_KEY = process.env.SERVER_PUBLIC_KEY;
-const SERVER_AES_KEY = process.env.SERVER_AES_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3001;
 const jwt = require("jsonwebtoken");
@@ -193,8 +192,7 @@ app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
   console.log(
     new_file.hashWithSHA3(new_file.file.data.toJSON().data.toString())
   );  */
-  new_file.hash = new_file.hashWithSHA3(new_file.file.data);
-
+  new_file.hash = new_file.hashWithSHA3(new_file.file.data.toJSON().data);
   await new_file
     .save()
     .then(() => {
@@ -553,8 +551,8 @@ app.post("/api/hash", authToken, async (req, res) => {
     console.log("/api/hash: wrong input");
     return res.status(400);
   }
+
   FileModel.findOne({ _id: req.body.fileID }).then((file) => {
-    //console.log(file.file.data.toJSON().data);
     if (file == null) {
       return res.status(404).json({
         msg: "File not Found",
