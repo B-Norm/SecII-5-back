@@ -172,6 +172,36 @@ app.get("/api/getUsers", authToken, async (req, res) => {
   }
 });
 
+app.post("/api/users/updatePassword", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["username", "password"])) {
+    console.log("/api/users/updatePassword: wrong input");
+
+    return res.status(400);
+  }
+
+  UserModel.findOne({ username: req.body.username }).then((user) => {
+    if (user == null) {
+      res.status(401).json({
+        msg: "Error Fetching User",
+        status: 401,
+      });
+    } else {
+      user.password = user.generateHash(req.body.password);
+      user
+        .save()
+        .then(() => {
+          return res.json({
+            msg: "password changed",
+            status: 200,
+          });
+        })
+        .catch((err) => {
+          console.log(err);
+        });
+    }
+  });
+});
+
 // add steg image to db
 app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
   if (typeof req.body.filename === "undefined") {
