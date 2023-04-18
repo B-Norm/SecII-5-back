@@ -35,7 +35,6 @@ app.use(cors());
 // CHECK IF USING API_KEY
 const authAPI = (API_KEY) => {
   return (req, res, next) => {
-    //console.log("Authorization Middleware");
     const token = req.headers["x-my-api-key"] || req.headers["api_key"];
     if (!token) {
       return res.status(403).json({
@@ -85,7 +84,7 @@ function removeFileFromMulterFolder(filename) {
   });
 }
 
-// REGISTER USERS
+//  USER Stuff
 //
 //
 app.post("/api/register", authAPI(API_KEY), async (req, res) => {
@@ -153,12 +152,13 @@ app.post("/api/login", authAPI(API_KEY), async (req, res) => {
         status: 200,
         token: token,
         SERVER_PUBLIC_KEY: SERVER_PUBLIC_KEY,
+        admin: user.admin,
       });
     }
   });
 });
 
-app.get("/api/getUsers", authToken, async (req, res) => {
+app.get("/api/users/getUsers", authToken, async (req, res) => {
   try {
     const users = await UserModel.find();
     const usernames = users.map((user) => ({
@@ -202,6 +202,58 @@ app.post("/api/users/updatePassword", authToken, async (req, res) => {
   });
 });
 
+app.post("/api/users/createNewKeyPair", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["username", "publicKey"])) {
+    console.log("/api/users/createNewKeyPair: wrong input");
+
+    return res.status(400);
+  }
+  KeyModel.findOne({ username: req.body.username }).then((userKey) => {
+    if (userKey == null) {
+      res.status(401).json({
+        msg: "username or password is incorrect",
+        status: 401,
+      });
+    } else {
+      userKey.publicKey = req.body.publicKey;
+      userKey
+        .save()
+        .then(() => {
+          console.log("New Key public key stored for ", req.body.username);
+          return res.json({
+            msg: "publicKey changed",
+            status: 200,
+          });
+        })
+        .catch((err) => {
+          console.log(err);
+          res.status(401).json({
+            msg: "Error Changing Key",
+            status: 401,
+          });
+        });
+    }
+  });
+});
+
+app.post("/api/users/deleteUser", authToken, async (req, res) => {
+  if (!validateParams(req.body, ["username"])) {
+    console.log("/api/users/createNewKeyPair: wrong input");
+
+    return res.status(400);
+  }
+  UserModel.deleteOne({ username: req.body.username }).then(() => {
+    KeyModel.deleteOne({ username: req.body.username }).then(() => {
+      SymKeyModel.deleteMany({ username: req.body.username }).then(() => {
+        return res.json({
+          msg: "User Deleted",
+          status: 200,
+        });
+      });
+    });
+  });
+});
+
 // add steg image to db
 app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
   if (typeof req.body.filename === "undefined") {
@@ -218,10 +270,7 @@ app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
       contentType: req.file.mimetype,
     },
   });
-  /* console.log("\\" + new_file.file.data.toJSON().data.toString() + "/");
-  console.log(
-    new_file.hashWithSHA3(new_file.file.data.toJSON().data.toString())
-  );  */
+
   new_file.hash = new_file.hashWithSHA3(new_file.file.data.toJSON().data);
   await new_file
     .save()
@@ -247,7 +296,6 @@ app.post("/api/upload", authToken, upload.single("file"), async (req, res) => {
 //
 app.get("/api/getFiles", authToken, async (req, res) => {
   try {
-    // console.log("Loading Files to Client");
     const files = await FileModel.find();
     res.status(200).json(files);
   } catch (err) {
@@ -272,7 +320,7 @@ app.get("/api/deleteAllFiles", authToken, async (req, res) => {
 
 // AES Stuff
 //
-//
+// TODO: Store in the DB encrypted and decrypt before sending back to client
 app.post("/api/keys/shareSymKey", authToken, async (req, res) => {
   if (!validateParams(req.body, ["encryptKey", "keyName", "username"])) {
     console.log("/api/keys/storeSym: wrong input");
@@ -305,7 +353,7 @@ app.post("/api/keys/storeSym", authToken, async (req, res) => {
     return res.status(400);
   }
   // first decrypt encrypt key
-  // TODO: Store in the DB encrypted and decrypt before sending back to client
+  //
 
   try {
     let symKey = asymDecrypt(req.body.encryptKey, SERVER_PRIVATE_KEY);
@@ -423,7 +471,7 @@ app.post("/api/AES/decrypt", authToken, async (req, res) => {
       file.file.data = Buffer.from(req.body.file, "base64");
       file.encrypted = false;
       file.iv = undefined;
-      if (file.hashWithSHA3(file.file.data) === file.hash) {
+      if (file.hashWithSHA3(file.file.data.toJSON().data) === file.hash) {
         file.save();
         return res.status(200).send();
       } else {
@@ -475,7 +523,7 @@ app.post("/api/3DES/decrypt", authToken, async (req, res) => {
       file.file.data = Buffer.from(req.body.file, "base64");
       file.encrypted = false;
       file.iv = undefined;
-      if (file.hashWithSHA3(file.file.data) === file.hash) {
+      if (file.hashWithSHA3(file.file.data.toJSON().data) === file.hash) {
         file.save();
         return res.status(200).send();
       } else {
@@ -519,7 +567,6 @@ app.post("/api/keys/storePub", authAPI(API_KEY), async (req, res) => {
 
 app.get("/api/keys/getAllPublic", authToken, async (req, res) => {
   try {
-    //console.log("Loading Public Keys to Client");
     const pubKeys = await KeyModel.find();
     res.status(200).json(pubKeys);
   } catch (err) {
@@ -562,7 +609,7 @@ app.post("/api/RSA/decrypt", authToken, async (req, res) => {
     } else {
       file.file.data = Buffer.from(req.body.file, "base64");
       file.encrypted = false;
-      if (file.hashWithSHA3(file.file.data) === file.hash) {
+      if (file.hashWithSHA3(file.file.data.toJSON().data) === file.hash) {
         file.save();
         return res.status(200).send();
       } else {
@@ -663,6 +710,9 @@ const symEncrpytWithRand = (data) => {
 
   return { encryptedBase64, key };
 };
+
+const symEncrypt = (data, key) => {};
+
 app.listen(PORT, () => {
   console.log("Server Running at: " + PORT);
 });
