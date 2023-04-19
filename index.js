@@ -18,6 +18,8 @@ const PORT = process.env.PORT || 3001;
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const forge = require("node-forge");
+const KeyModel = require("./models/keys.js");
+const SymKeyModel = require("./models/symKeys.js");
 
 mongoose.connect(MONGO_URI);
 
@@ -27,9 +29,8 @@ const db = mongoose.connection;
 app.use(express.json({ limit: "50mb" }));
 app.use(helmet());
 
+// dev stuff
 const cors = require("cors");
-const KeyModel = require("./models/keys.js");
-const SymKeyModel = require("./models/symKeys.js");
 app.use(cors());
 
 // CHECK IF USING API_KEY
@@ -329,13 +330,13 @@ app.post("/api/keys/shareSymKey", authToken, async (req, res) => {
   const { encryptKey, keyName, username } = req.body;
 
   // decrypt key using server private and store in
-  const sharedKey64 = asymDecrypt(encryptKey, SERVER_PRIVATE_KEY);
+  //const sharedKey64 = asymDecrypt(encryptKey, SERVER_PRIVATE_KEY);
 
   // Store Sym key in DB
   var new_sym = new SymKeyModel({
     keyName,
     username,
-    symKey: sharedKey64,
+    symKey: encryptKey,
     style: keyName.split("-")[0],
   });
   new_sym.ignoreMiddleware = true;
@@ -352,18 +353,18 @@ app.post("/api/keys/storeSym", authToken, async (req, res) => {
     console.log("/api/keys/storeSym: wrong input");
     return res.status(400);
   }
-  // first decrypt encrypt key
+  // store Encrypted Key
   //
 
   try {
-    let symKey = asymDecrypt(req.body.encryptKey, SERVER_PRIVATE_KEY);
+    //let symKey = asymDecrypt(req.body.encryptKey, SERVER_PRIVATE_KEY);
     const prefix = ["AES-", "3DES-"];
     let username = req.body.username;
     let name = prefix[req.body.style - 1] + username;
     var new_sym = SymKeyModel({
       keyName: name,
       username,
-      symKey,
+      symKey: req.body.encryptKey,
       style: prefix[req.body.style - 1].slice(0, -1),
     });
   } catch (err) {
@@ -400,6 +401,9 @@ app.post("/api/keys/getSym", authToken, async (req, res) => {
       username,
       style: encryptStyle[style - 1],
     }).then((keys) => {
+      for (let i = 0; i < keys.length; i++) {
+        keys[i].symKey = asymDecrypt(keys[i].symKey, SERVER_PRIVATE_KEY);
+      }
       KeyModel.findOne({ username: req.body.username }).then((pubKeys) => {
         const publicKey = pubKeys.publicKey;
         // Encrypt data with AES and send it with the IV at the front
@@ -418,6 +422,9 @@ app.post("/api/keys/getSym", authToken, async (req, res) => {
     SymKeyModel.find({
       username,
     }).then((keys) => {
+      for (let i = 0; i < keys.length; i++) {
+        keys[i].symKey = asymDecrypt(keys[i].symKey, SERVER_PRIVATE_KEY);
+      }
       KeyModel.findOne({ username: req.body.username }).then((pubKeys) => {
         const publicKey = pubKeys.publicKey;
         // Encrypt data with AES and send it with the IV at the front
